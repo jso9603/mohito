@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:kakao_flutter_sdk/kakao_flutter_sdk.dart';
 import 'dart:io' show Platform;
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -13,9 +14,13 @@ FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNo
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Kakao SDK 초기화
+  KakaoSdk.init(nativeAppKey: '06ce9271e4cd2e4e9141c23eee543b6e'); // Kakao Native App Key 설정
+
   // Timezone 초기화
   tz.initializeTimeZones();
-  tz.setLocalLocation(tz.getLocation('Asia/Seoul'));  // 예: 한국 시간대
+  // 한국 시간대
+  tz.setLocalLocation(tz.getLocation('Asia/Seoul'));
 
   // 로컬 알림 초기화 설정
   await initializeNotifications();
@@ -135,11 +140,65 @@ class WebAppScreen extends StatefulWidget {
 }
 
 class _WebAppScreenState extends State<WebAppScreen> {
-  final Completer<WebViewController> _controllerCompleter = Completer<WebViewController>();
+  late WebViewController webViewController;
+
+  // KakaoTalk 로그인 처리 함수
+  Future<void> _loginWithKakao() async {
+    print('_loginWithKakao!!!!!');
+    try {
+      bool isInstalled = await isKakaoTalkInstalled();
+      OAuthToken token;
+
+      if (isInstalled) {
+        token = await UserApi.instance.loginWithKakaoTalk();
+      } else {
+        token = await UserApi.instance.loginWithKakaoAccount();
+      }
+
+      print('로그인 성공! 토큰: ${token.accessToken}');
+
+      // 로그인 성공 후 사용자 정보 가져오기
+      User user = await fetchUserInfo();
+
+      // 로그인 성공 후 WebView에 로그인 성공 메시지, 토큰과 이메일 전달
+      String email = user.kakaoAccount?.email ?? 'null';
+      webViewController.runJavascript('loginSuccess("${token.accessToken}", "$email")');
+    } catch (error) {
+      print('로그인 실패: $error');
+      webViewController.runJavascript('loginFailure("$error")');
+    }
+  }
+
+  // 사용자 정보 가져오기
+  Future<User> fetchUserInfo() async {
+    try {
+      User user = await UserApi.instance.me();
+
+      print('사용자 정보: ');
+      print('이메일: ${user.kakaoAccount?.email}');
+
+      return user;
+    } catch (error) {
+      print('사용자 정보 가져오기 실패: $error');
+      rethrow;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Test Start!!!
+      // appBar: AppBar(
+      //   title: Text("WebView Test"),
+      //   actions: [
+      //     // 테스트용 로그인 버튼
+      //     IconButton(
+      //       icon: Icon(Icons.login),
+      //       onPressed: _loginWithKakao, // KakaoTalk 로그인 함수 직접 호출
+      //     ),
+      //   ],
+      // ),
+      // Test End!!!
       body: Column(
         children: [
           // 상태 표시줄과 동일한 색상의 Container를 추가하여 상태 바 영역을 덮음
@@ -149,17 +208,21 @@ class _WebAppScreenState extends State<WebAppScreen> {
           ),
           Expanded(
             child: WebView(
-              initialUrl: 'https://mohito.co.kr',
+              initialUrl: "https://mohito.co.kr?source=app",
+              // 웹뷰 테스트 페이지
+              // initialUrl: "http://192.168.0.19:8080?source=app",
               javascriptMode: JavascriptMode.unrestricted,
-              onWebViewCreated: (WebViewController webViewController) {
-                _controllerCompleter.complete(webViewController);
+              onWebViewCreated: (controller) {
+                webViewController = controller;
               },
-              onPageFinished: (String url) async {
-                final controller = await _controllerCompleter.future;
-                await controller.runJavascriptReturningResult(
-                  "navigator.__defineGetter__('userAgent', function() { return 'Mozilla/5.0 (Linux; Android 10; Mobile; rv:81.0) Gecko/81.0 Firefox/81.0'; });",
-                );
-              },
+              javascriptChannels: <JavascriptChannel>{
+                JavascriptChannel(
+                  name: 'LoginChannel',
+                  onMessageReceived: (message) {
+                    _loginWithKakao(); // WebView에서 로그인 요청 시 KakaoTalk 로그인 실행
+                  },
+                ),
+              }
             ),
           ),
         ],

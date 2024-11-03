@@ -7,14 +7,25 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
-    <queries>
-        <package android:name="com.kakao.talk" />
-    </queries>
-
     <application
         android:label="모희또"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
+        <!-- Kakao 로그인 리디렉션 스키마 설정 -->
+        <activity android:name="com.kakao.sdk.flutter.AuthCodeCustomTabsActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <!-- Redirect URI의 스키마와 호스트를 일치시키기 -->
+                <data
+                    android:scheme="kakao06ce9271e4cd2e4e9141c23eee543b6e"
+                    android:host="oauth" />
+            </intent-filter>
+        </activity>
         <activity
             android:name="com.project.mohito.MainActivity"
             android:exported="true"

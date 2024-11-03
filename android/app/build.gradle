@@ -30,7 +30,7 @@ def keystoreProperties = new Properties()
 keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 
 android {
-    namespace "com.project.mohito"
+    namespace = "com.project.mohito"
     compileSdkVersion flutter.compileSdkVersion
     ndkVersion flutter.ndkVersion
 

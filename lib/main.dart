@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:kakao_flutter_sdk/kakao_flutter_sdk.dart';
@@ -140,11 +140,12 @@ class WebAppScreen extends StatefulWidget {
 }
 
 class _WebAppScreenState extends State<WebAppScreen> {
-  late WebViewController webViewController;
+  late InAppWebViewController webViewController;
+  final List<String> _routeStack = ['/'];
+  DateTime? _lastBackPressed;
 
   // KakaoTalk 로그인 처리 함수
   Future<void> _loginWithKakao() async {
-    print('_loginWithKakao!!!!!');
     try {
       bool isInstalled = await isKakaoTalkInstalled();
       OAuthToken token;
@@ -162,10 +163,10 @@ class _WebAppScreenState extends State<WebAppScreen> {
 
       // 로그인 성공 후 WebView에 로그인 성공 메시지, 토큰과 이메일 전달
       String email = user.kakaoAccount?.email ?? 'null';
-      webViewController.runJavascript('loginSuccess("${token.accessToken}", "$email")');
+      webViewController.evaluateJavascript(source: 'loginSuccess("${token.accessToken}", "$email")');
     } catch (error) {
       print('로그인 실패: $error');
-      webViewController.runJavascript('loginFailure("$error")');
+      webViewController.evaluateJavascript(source: 'loginFailure("$error")');
     }
   }
 
@@ -186,7 +187,34 @@ class _WebAppScreenState extends State<WebAppScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return WillPopScope(
+        onWillPop: () async {
+          if (_routeStack.length > 1) {
+            final last = _routeStack.removeLast();
+            final previous = _routeStack.last;
+
+            // 중복 라우팅 방지 및 루트로 착각 방지
+            if (last == previous) {
+              return false;
+            }
+
+            print('🔙 Navigating back to $previous (from $last)');
+            webViewController.evaluateJavascript(source: 'window.history.back()');
+            return false;
+          }
+
+          final now = DateTime.now();
+          if (_lastBackPressed == null || now.difference(_lastBackPressed!) > Duration(seconds: 2)) {
+            _lastBackPressed = now;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('한 번 더 누르면 종료됩니다')),
+            );
+            return false;
+          }
+
+          return true;
+        },
+        child: Scaffold(
       // Test Start!!!
       // appBar: AppBar(
       //   title: Text("WebView Test"),
@@ -199,34 +227,45 @@ class _WebAppScreenState extends State<WebAppScreen> {
       //   ],
       // ),
       // Test End!!!
-      body: Column(
-        children: [
-          // 상태 표시줄과 동일한 색상의 Container를 추가하여 상태 바 영역을 덮음
-          Container(
-            height: MediaQuery.of(context).padding.top, // 상태 표시줄 높이만큼 설정
-            color: const Color(0xFF242A3B), // 상태 표시줄과 같은 색상 설정
-          ),
-          Expanded(
-            child: WebView(
-              initialUrl: "https://mohito.co.kr?source=app",
-              // 웹뷰 테스트 페이지
-              // initialUrl: "http://192.168.0.19:8080?source=app",
-              javascriptMode: JavascriptMode.unrestricted,
+          body: SafeArea(
+            child: InAppWebView(
+              // initialUrlRequest: URLRequest(url: Uri.parse("https://mohito.co.kr?source=app")),
+              initialUrlRequest: URLRequest(url: WebUri("http://192.168.0.3:8080?source=app")),
+              initialOptions: InAppWebViewGroupOptions(
+                crossPlatform: InAppWebViewOptions(
+                  javaScriptEnabled: true,
+                ),
+              ),
               onWebViewCreated: (controller) {
                 webViewController = controller;
-              },
-              javascriptChannels: <JavascriptChannel>{
-                JavascriptChannel(
-                  name: 'LoginChannel',
-                  onMessageReceived: (message) {
-                    _loginWithKakao(); // WebView에서 로그인 요청 시 KakaoTalk 로그인 실행
+
+                controller.addJavaScriptHandler(
+                  handlerName: 'routeChanged',
+                  callback: (args) {
+                    final raw = args.first;
+                    final parsed = Uri.tryParse(raw);
+                    final path = parsed?.path ?? '/';
+
+                    if (_routeStack.isEmpty || _routeStack.last != path) {
+                      if (_routeStack.contains(path)) {
+                        final idx = _routeStack.indexOf(path);
+                        _routeStack.removeRange(idx + 1, _routeStack.length);
+                      } else {
+                        _routeStack.add(path);
+                      }
+                      print('📍 Flutter received route: $path');
+                    }
                   },
-                ),
-              }
+                );
+              },
+              onLoadStop: (controller, url) {
+                if (_routeStack.isEmpty && url != null) {
+                  _routeStack.add(url.path);
+                }
+              },
             ),
           ),
-        ],
-      ),
+    )
     );
   }
 }

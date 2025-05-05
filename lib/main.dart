@@ -5,14 +5,22 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:kakao_flutter_sdk/kakao_flutter_sdk.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'dart:io' show Platform;
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+import 'dart:convert';
 
 FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
+late InterstitialAd _interstitialAd;
+bool _isAdLoaded = false;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // AdMob 초기화
+  MobileAds.instance.initialize().then((_) => _loadInterstitialAd());
 
   // Kakao SDK 초기화
   KakaoSdk.init(nativeAppKey: '06ce9271e4cd2e4e9141c23eee543b6e'); // Kakao Native App Key 설정
@@ -117,6 +125,43 @@ Future<void> _scheduleNotification(int weekday, int hour, int minute, String tit
   );
 }
 
+void _loadInterstitialAd() {
+  InterstitialAd.load(
+    adUnitId: 'ca-app-pub-3940256099942544/1033173712', // 테스트용 전면 광고 ID
+    request: const AdRequest(),
+    adLoadCallback: InterstitialAdLoadCallback(
+      onAdLoaded: (ad) {
+        _interstitialAd = ad;
+        _isAdLoaded = true;
+      },
+      onAdFailedToLoad: (error) {
+        print('Interstitial load 실패: $error');
+        _isAdLoaded = false;
+      },
+    ),
+  );
+}
+
+Future<void> _showInterstitialAd(InAppWebViewController controller) async {
+  if (_isAdLoaded) {
+    _interstitialAd.fullScreenContentCallback = FullScreenContentCallback(
+      onAdDismissedFullScreenContent: (ad) {
+        controller.evaluateJavascript(source: 'flutterAdDone && flutterAdDone()');
+        _loadInterstitialAd();
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        print('Ad show 실패: $error');
+        _loadInterstitialAd();
+      },
+    );
+
+    _interstitialAd.show();
+  } else {
+    print('광고가 아직 로딩되지 않았습니다.');
+    controller.evaluateJavascript(source: 'flutterAdDone && flutterAdDone()');
+  }
+}
+
 class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -163,7 +208,15 @@ class _WebAppScreenState extends State<WebAppScreen> {
 
       // 로그인 성공 후 WebView에 로그인 성공 메시지, 토큰과 이메일 전달
       String email = user.kakaoAccount?.email ?? 'null';
-      webViewController.evaluateJavascript(source: 'loginSuccess("${token.accessToken}", "$email")');
+      // webViewController.evaluateJavascript(source: 'loginSuccess("${token.accessToken}", "$email")');
+      webViewController.evaluateJavascript(source: '''
+        if (typeof loginSuccess === "function") {
+          loginSuccess(${jsonEncode(token.accessToken)}, ${jsonEncode(email)});
+        } else {
+          console.warn("❗ loginSuccess 함수가 아직 정의되지 않았습니다.");
+      }
+     '''
+      );
     } catch (error) {
       print('로그인 실패: $error');
       webViewController.evaluateJavascript(source: 'loginFailure("$error")');
@@ -228,9 +281,11 @@ class _WebAppScreenState extends State<WebAppScreen> {
       // ),
       // Test End!!!
           body: SafeArea(
-            child: InAppWebView(
-              initialUrlRequest: URLRequest(url: WebUri("https://mohito.co.kr?source=app")),
-              // initialUrlRequest: URLRequest(url: WebUri("http://192.168.0.3:8080?source=app")),
+            child: Stack(
+              children: [
+                InAppWebView(
+              // initialUrlRequest: URLRequest(url: WebUri("https://mohito.co.kr?source=app")),
+              initialUrlRequest: URLRequest(url: WebUri("http://192.168.0.11:8081?source=app")),
               initialOptions: InAppWebViewGroupOptions(
                 crossPlatform: InAppWebViewOptions(
                   javaScriptEnabled: true,
@@ -239,22 +294,21 @@ class _WebAppScreenState extends State<WebAppScreen> {
               onWebViewCreated: (controller) {
                 webViewController = controller;
 
+                // 광고 처리 핸들러
                 controller.addJavaScriptHandler(
-                  handlerName: 'routeChanged',
-                  callback: (args) {
-                    final raw = args.first;
-                    final parsed = Uri.tryParse(raw);
-                    final path = parsed?.path ?? '/';
+                  handlerName: 'AdChannel',
+                  callback: (args) async {
+                    await _showInterstitialAd(controller);
+                    return;
+                  },
+                );
 
-                    if (_routeStack.isEmpty || _routeStack.last != path) {
-                      if (_routeStack.contains(path)) {
-                        final idx = _routeStack.indexOf(path);
-                        _routeStack.removeRange(idx + 1, _routeStack.length);
-                      } else {
-                        _routeStack.add(path);
-                      }
-                      print('📍 Flutter received route: $path');
-                    }
+                // 로그인 처리 핸들러
+                controller.addJavaScriptHandler(
+                  handlerName: 'LoginChannel',
+                  callback: (args) async {
+                    print("📲 LoginChannel 호출됨: $args");
+                    await _loginWithKakao();
                   },
                 );
               },
@@ -264,6 +318,10 @@ class _WebAppScreenState extends State<WebAppScreen> {
                 }
               },
             ),
+            //  하단 배너 광고 표시
+
+            ],
+          ),
           ),
     )
     );

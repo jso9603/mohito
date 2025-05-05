@@ -229,8 +229,8 @@ class _WebAppScreenState extends State<WebAppScreen> {
       // Test End!!!
           body: SafeArea(
             child: InAppWebView(
-              // initialUrlRequest: URLRequest(url: Uri.parse("https://mohito.co.kr?source=app")),
-              initialUrlRequest: URLRequest(url: WebUri("http://192.168.0.3:8080?source=app")),
+              initialUrlRequest: URLRequest(url: WebUri("https://mohito.co.kr?source=app")),
+              // initialUrlRequest: URLRequest(url: WebUri("http://192.168.0.3:8080?source=app")),
               initialOptions: InAppWebViewGroupOptions(
                 crossPlatform: InAppWebViewOptions(
                   javaScriptEnabled: true,
